@@ -1,243 +1,190 @@
-(function () {
-  const API_BASE = '/.netlify/functions';
-  const TOKEN_KEY = 'ecorotas_token';
-  const USER_KEY = 'ecorotas_user';
-
-  const $ = (id) => document.getElementById(id);
-
-  const authModal = $('authModal');
-  const openLoginBtn = $('openLoginBtn');
-  const openRegisterBtn = $('openRegisterBtn');
-  const comunidadeLoginBtn = $('comunidadeLoginBtn');
-  const closeModalBtn = $('closeModalBtn');
-  const tabLogin = $('tabLogin');
-  const tabRegister = $('tabRegister');
-  const formLogin = $('formLogin');
-  const formRegister = $('formRegister');
-  const loginFeedback = $('loginFeedback');
-  const registerFeedback = $('registerFeedback');
-  const navAuth = $('navAuth');
-  const navUser = $('navUser');
-  const navUserEmail = $('navUserEmail');
-  const logoutBtn = $('logoutBtn');
-  const comunidadeLoggedOut = $('comunidadeLoggedOut');
-  const comunidadeLogged = $('comunidadeLogged');
-  const postForm = $('postForm');
-  const postContent = $('postContent');
-  const postCount = $('postCount');
-  const postFeedback = $('postFeedback');
-  const postList = $('postList');
-
-  function getToken() { return localStorage.getItem(TOKEN_KEY); }
-  function getUser() {
-    try { return JSON.parse(localStorage.getItem(USER_KEY) || 'null'); } catch { return null; }
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const TOKEN_KEY = 'ecorotas_token', USER_KEY = 'ecorotas_user';
+  let token = null, user = null, posts = [], requestVersion = 0;
+  let activeModal = null, returnFocus = null;
+  try {
+    token = localStorage.getItem(TOKEN_KEY);
+    user = JSON.parse(localStorage.getItem(USER_KEY) || 'null');
+    if (!token || !user || typeof user !== 'object') { token = null; user = null; }
+  } catch { token = null; user = null; }
+  function saveSession(newToken, newUser) {
+    token = newToken; user = newUser;
+    try {
+      if (token && user) {
+        localStorage.setItem(TOKEN_KEY, token);
+        localStorage.setItem(USER_KEY, JSON.stringify(user));
+      } else { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(USER_KEY); }
+    } catch { /* A sessão continua em memória se o armazenamento estiver bloqueado. */ }
+    updateAuthUI();
   }
-  function setSession(token, user) {
-    localStorage.setItem(TOKEN_KEY, token);
-    localStorage.setItem(USER_KEY, JSON.stringify(user));
+  function feedback(id, message = '', type = 'error') {
+    const el = $(id); el.textContent = message;
+    el.className = message ? `form-feedback show ${type}` : 'form-feedback';
   }
-  function clearSession() {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
+  async function api(endpoint, { method = 'GET', body, authenticated = false } = {}) {
+    const requestToken = token;
+    let res;
+    try {
+      res = await fetch('/api' + endpoint, {
+        method, headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(authenticated ? { Authorization: `Bearer ${requestToken}` } : {}) },
+        ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(45000),
+      });
+    } catch { throw new Error('Não foi possível conectar. Confira sua conexão e tente novamente.'); }
+    let data;
+    try { data = await res.json(); } catch { throw new Error('O serviço está indisponível no momento. Tente novamente.'); }
+    if (res.status === 401 && authenticated && token === requestToken) saveSession(null, null);
+    if (!res.ok) throw new Error(data.error || 'Não foi possível concluir. Tente novamente.');
+    return data;
   }
-
-  function showFeedback(el, message, type) {
-    if (!el) return;
-    el.textContent = message;
-    el.className = 'form-feedback show ' + type;
+  function displayName(value) {
+    return typeof value === 'string' && value.trim() && !value.includes('@') ? value.trim() : '';
   }
-  function hideFeedback(el) {
-    if (!el) return;
-    el.className = 'form-feedback';
+  function updateAuthUI() {
+    const logged = Boolean(user && token), name = displayName(user?.name);
+    $('navAuth').hidden = logged; $('navUser').hidden = !logged;
+    $('comunidadeLoggedOut').hidden = logged; $('comunidadeLogged').hidden = !logged;
+    // Remove o antigo display:none do CSS apenas quando a sessão está ativa.
+    $('comunidadeLogged').style.display = logged ? 'block' : 'none';
+    $('navUserName').textContent = name ? `Olá, ${name.split(/\s+/)[0]}` : 'Meu perfil';
+    $('openProfileBtn').title = name ? `Editar perfil de ${name}` : 'Definir meu nome';
+    $('userAvatar').textContent = name ? name.split(/\s+/).slice(0, 2).map(n => Array.from(n)[0]).join('').toUpperCase() : 'EU';
+    renderPosts();
   }
-
-  function openModal(tab) {
-    authModal.classList.add('open');
-    setActiveTab(tab || 'login');
+  function setTab(tab) {
+    for (const name of ['Login', 'Register']) {
+      const active = name.toLowerCase() === tab;
+      $('tab' + name).classList.toggle('active', active);
+      $('tab' + name).setAttribute('aria-pressed', String(active));
+      $('form' + name).classList.toggle('active', active);
+    }
+  }
+  function openModal(id, tab = 'login') {
+    returnFocus = document.activeElement; activeModal = $(id);
+    if (id === 'authModal') { setTab(tab); feedback('loginFeedback'); feedback('registerFeedback'); }
+    else { $('profileName').value = displayName(user?.name); feedback('profileFeedback'); }
+    activeModal.classList.add('open'); activeModal.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    document.querySelectorAll('header,main,footer').forEach(el => el.inert = true);
+    activeModal.querySelector(id === 'authModal' ? '.auth-form.active input' : 'input').focus();
   }
   function closeModal() {
-    authModal.classList.remove('open');
+    if (!activeModal) return;
+    activeModal.classList.remove('open'); activeModal.setAttribute('aria-hidden', 'true'); activeModal = null;
+    document.body.style.overflow = '';
+    document.querySelectorAll('header,main,footer').forEach(el => el.inert = false);
+    if (returnFocus?.getClientRects().length) returnFocus.focus();
+    else (user ? $('openProfileBtn') : $('openLoginBtn')).focus();
   }
-  function setActiveTab(tab) {
-    const isLogin = tab === 'login';
-    tabLogin.classList.toggle('active', isLogin);
-    tabRegister.classList.toggle('active', !isLogin);
-    formLogin.classList.toggle('active', isLogin);
-    formRegister.classList.toggle('active', !isLogin);
-  }
-
-  openLoginBtn && openLoginBtn.addEventListener('click', () => openModal('login'));
-  openRegisterBtn && openRegisterBtn.addEventListener('click', () => openModal('register'));
-  comunidadeLoginBtn && comunidadeLoginBtn.addEventListener('click', () => openModal('login'));
-  closeModalBtn && closeModalBtn.addEventListener('click', closeModal);
-  authModal && authModal.addEventListener('click', (e) => { if (e.target === authModal) closeModal(); });
-  tabLogin && tabLogin.addEventListener('click', () => setActiveTab('login'));
-  tabRegister && tabRegister.addEventListener('click', () => setActiveTab('register'));
-
-  function updateAuthUI() {
-    const user = getUser();
-    if (user) {
-      navAuth.style.display = 'none';
-      navUser.style.display = 'flex';
-      navUserEmail.textContent = user.name || user.email;
-      comunidadeLoggedOut.style.display = 'none';
-      comunidadeLogged.style.display = 'block';
-    } else {
-      navAuth.style.display = 'flex';
-      navUser.style.display = 'none';
-      comunidadeLoggedOut.style.display = 'block';
-      comunidadeLogged.style.display = 'none';
+  $('openLoginBtn').onclick = $('comunidadeLoginBtn').onclick = () => openModal('authModal');
+  $('openRegisterBtn').onclick = () => openModal('authModal', 'register');
+  $('openProfileBtn').onclick = () => openModal('profileModal');
+  $('closeModalBtn').onclick = $('closeProfileBtn').onclick = closeModal;
+  $('tabLogin').onclick = () => { setTab('login'); $('loginEmail').focus(); };
+  $('tabRegister').onclick = () => { setTab('register'); $('regName').focus(); };
+  for (const id of ['authModal', 'profileModal']) $(id).onclick = e => { if (e.target === $(id)) closeModal(); };
+  document.addEventListener('keydown', e => {
+    if (!activeModal) return;
+    if (e.key === 'Escape') closeModal();
+    if (e.key === 'Tab') {
+      const nodes = [...activeModal.querySelectorAll('button,input,[tabindex="0"]')].filter(el => !el.disabled && el.getClientRects().length);
+      const first = nodes[0], last = nodes.at(-1);
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
     }
+  });
+  async function submit(buttonId, feedbackId, pending, action) {
+    const button = $(buttonId), original = button.textContent;
+    if (button.disabled) return;
+    feedback(feedbackId); button.disabled = true; button.textContent = pending;
+    try { await action(); } catch (err) { feedback(feedbackId, err.message); }
+    finally { button.disabled = false; button.textContent = original; }
   }
-
-  formLogin && formLogin.addEventListener('submit', async (e) => {
+  for (const mode of ['login', 'register']) {
+    $(mode === 'login' ? 'formLogin' : 'formRegister').onsubmit = e => {
+      e.preventDefault();
+      submit(mode + 'SubmitBtn', mode + 'Feedback', mode === 'login' ? 'Entrando...' : 'Criando conta...', async () => {
+        const prefix = mode === 'login' ? 'login' : 'reg';
+        const body = { email: $(prefix + 'Email').value.trim(), password: $(prefix + 'Password').value };
+        if (mode === 'register') body.name = $('regName').value.trim();
+        const data = await api('/' + mode, { method: 'POST', body });
+        if (!data.token || !data.user) throw new Error('Resposta de acesso inválida. Tente novamente.');
+        saveSession(data.token, data.user); closeModal(); e.target.reset();
+        loadPosts();
+        if (!displayName(data.user.name)) openModal('profileModal');
+      });
+    };
+  }
+  $('profileForm').onsubmit = e => {
     e.preventDefault();
-    hideFeedback(loginFeedback);
-    const email = $('loginEmail').value.trim();
-    const password = $('loginPassword').value;
-    const btn = $('loginSubmitBtn');
-    btn.disabled = true;
-    try {
-      const res = await fetch(`${API_BASE}/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Falha no login.');
-      setSession(data.token, data.user);
-      updateAuthUI();
-      closeModal();
-      loadPosts();
-      formLogin.reset();
-    } catch (err) {
-      showFeedback(loginFeedback, err.message, 'error');
-    } finally {
-      btn.disabled = false;
-    }
-  });
-
-  formRegister && formRegister.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    hideFeedback(registerFeedback);
-    const name = $('regName').value.trim();
-    const email = $('regEmail').value.trim();
-    const password = $('regPassword').value;
-    const btn = $('registerSubmitBtn');
-    btn.disabled = true;
-    try {
-      const res = await fetch(`${API_BASE}/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, password }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Falha no cadastro.');
-      setSession(data.token, data.user);
-      updateAuthUI();
-      closeModal();
-      loadPosts();
-      formRegister.reset();
-    } catch (err) {
-      showFeedback(registerFeedback, err.message, 'error');
-    } finally {
-      btn.disabled = false;
-    }
-  });
-
-  logoutBtn && logoutBtn.addEventListener('click', () => {
-    clearSession();
-    updateAuthUI();
-    loadPosts();
-  });
-
-  postContent && postContent.addEventListener('input', () => {
-    postCount.textContent = `${postContent.value.length}/500`;
-  });
-
-  postForm && postForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    hideFeedback(postFeedback);
-    const content = postContent.value.trim();
-    if (!content) return;
-    const btn = $('postSubmitBtn');
-    btn.disabled = true;
-    try {
-      const res = await fetch(`${API_BASE}/posts`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${getToken()}`,
-        },
-        body: JSON.stringify({ content }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Falha ao publicar.');
-      postContent.value = '';
-      postCount.textContent = '0/500';
-      loadPosts();
-    } catch (err) {
-      showFeedback(postFeedback, err.message, 'error');
-    } finally {
-      btn.disabled = false;
-    }
-  });
-
-  function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-  }
-
-  function renderPosts(posts) {
-    const user = getUser();
-    if (!posts.length) {
-      postList.innerHTML = '<p class="post-empty">Ainda não há publicações. Seja o primeiro a compartilhar!</p>';
-      return;
-    }
-    postList.innerHTML = posts
-      .map(
-        (p) => `
-      <div class="post-card">
-        <div class="post-card-head">
-          <b>${escapeHtml(p.authorName || p.authorEmail)}</b>
-          <span>${new Date(p.createdAt).toLocaleString('pt-BR')}</span>
-        </div>
-        <p>${escapeHtml(p.content)}</p>
-        ${user && user.email === p.authorEmail ? `<button class="post-delete" data-id="${p.id}">Excluir</button>` : ''}
-      </div>
-    `
-      )
-      .join('');
-
-    postList.querySelectorAll('.post-delete').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const id = btn.getAttribute('data-id');
-        try {
-          const res = await fetch(`${API_BASE}/posts?id=${encodeURIComponent(id)}`, {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${getToken()}` },
-          });
-          if (!res.ok) throw new Error('Falha ao excluir.');
-          loadPosts();
-        } catch (err) {
-          alert(err.message);
-        }
-      });
+    submit('profileSubmitBtn', 'profileFeedback', 'Salvando...', async () => {
+      const sessionToken = token;
+      const data = await api('/me', { method: 'PATCH', body: { name: $('profileName').value.trim() }, authenticated: true });
+      if (token !== sessionToken) return;
+      saveSession(token, data.user); closeModal(); loadPosts();
     });
-  }
-
-  async function loadPosts() {
-    postList.innerHTML = '<p class="post-empty">Carregando publicações...</p>';
-    try {
-      const res = await fetch(`${API_BASE}/posts`);
-      const posts = await res.json();
-      renderPosts(posts);
-    } catch (err) {
-      postList.innerHTML = '<p class="post-empty">Não foi possível carregar as publicações agora.</p>';
+  };
+  $('logoutBtn').onclick = () => { saveSession(null, null); $('postContent').value = ''; $('postCount').textContent = '0/500'; feedback('postFeedback'); };
+  $('postContent').oninput = () => { $('postCount').textContent = `${$('postContent').value.length}/500`; };
+  $('postForm').onsubmit = e => {
+    e.preventDefault();
+    submit('postSubmitBtn', 'postFeedback', 'Publicando...', async () => {
+      await api('/posts', { method: 'POST', body: { content: $('postContent').value.trim() }, authenticated: true });
+      $('postContent').value = ''; $('postCount').textContent = '0/500';
+      feedback('postFeedback', 'Publicação enviada.', 'success'); await loadPosts();
+    });
+  };
+  function renderPosts() {
+    const list = $('postList'); list.replaceChildren();
+    if (!posts.length) { const p = document.createElement('p'); p.className = 'post-empty'; p.textContent = 'Ainda não há publicações. Compartilhe a primeira dica!'; list.append(p); }
+    for (const post of posts) {
+      const card = document.createElement('article'); card.className = 'post-card';
+      const head = document.createElement('div'); head.className = 'post-card-head';
+      const author = document.createElement('b'); author.textContent = displayName(post.author_name) || 'Participante';
+      const time = document.createElement('time');
+      const rawDate = post.created_at || '';
+      const date = new Date(/^\d{4}-\d{2}-\d{2} \d{2}:/.test(rawDate) ? rawDate.replace(' ', 'T') + 'Z' : rawDate);
+      if (!Number.isNaN(date.getTime())) { time.dateTime = date.toISOString(); time.textContent = date.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); }
+      head.append(author, time); const text = document.createElement('p'); text.textContent = post.content; card.append(head, text);
+      if (user && token && post.author_id != null && String(post.author_id) === String(user.id)) {
+        const button = document.createElement('button'); button.className = 'post-delete'; button.textContent = 'Apagar';
+        button.onclick = async () => {
+          if (!confirm('Apagar esta publicação?')) return;
+          button.disabled = true;
+          try { await api('/posts/' + encodeURIComponent(post.id), { method: 'DELETE', authenticated: true }); await loadPosts(); }
+          catch (err) { feedback('postFeedback', err.message); button.disabled = false; }
+        }; card.append(button);
+      }
+      list.append(card);
     }
   }
-
-  updateAuthUI();
-  loadPosts();
+  async function loadPosts() {
+    const version = ++requestVersion; $('postList').setAttribute('aria-busy', 'true');
+    try {
+      const data = await api('/posts');
+      if (!Array.isArray(data.posts)) throw new Error('Não foi possível carregar as publicações.');
+      if (version !== requestVersion) return;
+      posts = data.posts; renderPosts();
+    } catch (err) {
+      if (version !== requestVersion) return;
+      const message = document.createElement('p'); message.className = 'post-empty'; message.textContent = err.message;
+      const retry = document.createElement('button'); retry.className = 'btn-auth'; retry.textContent = 'Tentar novamente'; retry.onclick = loadPosts;
+      $('postList').replaceChildren(message, retry);
+    } finally { if (version === requestVersion) $('postList').setAttribute('aria-busy', 'false'); }
+  }
+  async function refreshSession() {
+    if (!token) return;
+    const previous = token;
+    try {
+      const data = await api('/me', { authenticated: true });
+      if (token === previous) saveSession(token, data.user);
+    } catch { /* Falhas de rede não apagam a sessão; 401 é tratado pela API. */ }
+  }
+  window.addEventListener('storage', e => {
+    if (![TOKEN_KEY, USER_KEY, null].includes(e.key)) return;
+    try { token = localStorage.getItem(TOKEN_KEY); user = JSON.parse(localStorage.getItem(USER_KEY) || 'null'); } catch { token = null; user = null; }
+    updateAuthUI(); refreshSession();
+  });
+  updateAuthUI(); refreshSession(); loadPosts();
 })();

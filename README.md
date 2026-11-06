@@ -1,58 +1,59 @@
-# Projeto Feira Tecnológica
+# EcoRotas
 
-> *Uma solução inovadora e profissional desenvolvida para a Feira Tecnológica, focada em impacto, tecnologia moderna e usabilidade.*
+Projeto educacional de rotas de reciclagem, pontos de coleta e comunidade.
+Os endereços, coordenadas, horários e estatísticas são demonstrativos; não representam uma operação de coleta validada.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Status](https://img.shields.io/badge/Status-Finalizando-brightgreen.svg)]()
+## Executar localmente
 
----
+Requer Node.js 22 ou superior.
 
-## Sobre o Projeto
+```sh
+npm ci
+npm start
+```
 
-O **Projeto Feira Tecnológica** foi concebido e criado para apresentar uma aplicação completa, interativa e funcional durante a Feira Tecnológica. Ele integra boas práticas de desenvolvimento de software, design focado na experiência do usuário (UX/UI) e uma arquitetura limpa.
+Abra http://localhost:3000. O servidor entrega a página e a API no mesmo endereço.
+Sem JWT_SECRET em desenvolvimento, uma chave temporária é gerada; reiniciar o servidor encerra as sessões locais.
 
-### Objetivos Principais
-- **Resolver um problema real:** Oferecer uma interface amigável e eficiente para os usuários do sistema.
-- **Demonstrar habilidades técnicas:** Aplicação prática de conceitos modernos de programação, lógica de software e integração.
-- **Inovação e Impacto:** Apresentar uma solução com grande potencial de aplicabilidade acadêmica e mercadológica.
+## O que foi corrigido
 
----
+- Nome cadastrado recuperado da API `/api/me`, inclusive quando o navegador contém uma sessão antiga sem nome.
+- Cabeçalho alinhado, avatar com iniciais, nomes longos abreviados visualmente e menu adaptado a telas menores.
+- “Meu perfil” permite definir ou corrigir o nome; as publicações existentes são atualizadas junto.
+- Cadastro entra automaticamente. Contas antigas sem nome podem completá-lo sem recriar a conta.
+- Uma única implementação de autenticação e comunidade; os antigos handlers Netlify não utilizados foram removidos.
+- E-mails não aparecem na listagem pública de posts; exclusão continua restrita ao autor.
+- Validação no servidor, limite de tentativas de login/cadastro, consultas parametrizadas e verificação de sessão.
+- Modal com Escape, foco contido, retorno de foco, rótulos acessíveis e autofill.
+- Feedback de falhas, opção de tentar novamente e proteção contra cliques repetidos.
+- Servidor entrega apenas os arquivos públicos permitidos; a publicação Netlify usa `public/`, sem expor o banco ou código interno.
 
-## Tecnologias Utilizadas
+## Atualizar o site existente
 
-O projeto foi construído utilizando as seguintes ferramentas e tecnologias:
+O frontend original chamava `https://testefeira.onrender.com`. Esta versão preserva esse backend e as contas que estiverem no banco dele; não migra os dados para outro provedor.
 
-<p align="left">
-  <img src="https://img.shields.io/badge/HTML5-E34F26?style=for-the-badge&logo=html5&logoColor=white" alt="HTML5" />
-  <img src="https://img.shields.io/badge/CSS3-1572B6?style=for-the-badge&logo=css3&logoColor=white" alt="CSS3" />
-  <img src="https://img.shields.io/badge/JavaScript-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black" alt="JavaScript" />
-  <img src="https://img.shields.io/badge/Node.js-43853D?style=for-the-badge&logo=node.js&logoColor=white" alt="NodeJS" />
-  <img src="https://img.shields.io/badge/Git-F05032?style=for-the-badge&logo=git&logoColor=white" alt="Git" />
-  <img src="https://img.shields.io/badge/GitHub-121011?style=for-the-badge&logo=github&logoColor=white" alt="GitHub" />
-  <img src="https://img.shields.io/badge/VS_Code-007ACC?style=for-the-badge&logo=visual-studio-code&logoColor=white" alt="VS Code" />
-  <img src="https://img.shields.io/badge/Figma-F24E1E?style=for-the-badge&logo=figma&logoColor=white" alt="Figma" />
-</p>
+1. Faça backup do banco de produção antes de atualizar. **Não substitua o banco existente por um arquivo do repositório.**
+2. No Render, use `npm ci` como build e `npm start` como comando de inicialização.
+3. Defina `NODE_ENV=production` e `JWT_SECRET` com pelo menos 32 caracteres aleatórios. Gere uma chave com `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`. Mantenha a mesma chave segura entre deploys; trocar a chave exige novo login.
+4. Use `DATABASE_PATH` apontando para um disco persistente, por exemplo `/var/data/ecorotas.db`. Copie seu banco atual para esse caminho uma vez, com o serviço parado. **Mudar apenas o caminho cria um banco vazio.** A disponibilidade de disco depende do serviço contratado.
+5. Se estiver atrás de um proxy confiável, configure `TRUST_PROXY` com a quantidade correta de saltos para o limitador de tentativas distinguir clientes. Não configure um número sem verificar a infraestrutura.
+6. Faça o deploy do backend antes do frontend, pois o perfil utiliza as novas rotas `/api/me`.
+7. Se o frontend estiver no Netlify, a configuração incluída executa `npm run build`, publica somente `public/` e encaminha `/api/*` ao Render. Se mudar o endereço do Render, ajuste `netlify.toml`.
+8. Se hospedar tudo no Render, basta acessar o próprio serviço; o frontend usa `/api` na mesma origem. Para outro host estático, configure proxy equivalente para `/api/*`.
 
----
+`ALLOWED_ORIGINS` aceita origens separadas por vírgula quando for necessário chamar a API diretamente de outro domínio. O fluxo padrão, na mesma origem ou com proxy, não precisa dessa opção.
 
-## Funcionalidades
+O banco `ecorotas.db` já constava no histórico original. Não o publique como arquivo estático nem use dados de produção em commits. A nova configuração ignora bancos novos; a cópia antiga e o histórico precisam de uma revisão separada antes de uma eventual remoção definitiva.
 
-- **Interface Responsiva:** Adaptada para dispositivos móveis, tablets e desktops.
-- **Design Moderno:** Navegação intuitiva e visual atraente.
-- **Painel Dinâmico:** Visualização interativa de dados e informações relevantes.
-- **Validação e Segurança:** Tratamento de entradas e rotas estruturadas.
+## Verificação
 
----
+```sh
+npm test
+npx playwright install chromium
+npm run test:e2e
+npm run build
+```
 
-## Como Executar o Projeto
+Os testes de API usam banco temporário em memória; os testes de navegador sobem um serviço isolado na porta 3100. Nenhum teste usa contas ou publicações de produção.
 
-### Pré-requisitos
-Antes de começar, você precisará ter instalado em sua máquina:
-* [Git](https://git-scm.com)
-* Um navegador web atualizado (Google Chrome, Firefox, Edge, etc.)
-
-### Caso tenha interesse, aqui esta o link para seu deploy !
-
- **Clone este repositório:**
-   ```bash
-   git clone [https://github.com/Guilherme1712Moraes/Projeto-Feira-Tecnol-gica.git](https://github.com/Guilherme1712Moraes/Projeto-Feira-Tecnol-gica.git)
+A autenticação ainda usa token no armazenamento local. Para uma implantação mais robusta, uma futura mudança para cookies HttpOnly exigirá coordenar autenticação, proteção CSRF e configuração de domínio.
